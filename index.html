@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+    <meta charset="UTF-8">
+    <title>PHYSICS TRACKER - MASTER EDITION</title>
+    <style>
+        body { margin: 0; background: #000; color: #0f0; font-family: 'Courier New', monospace; overflow: hidden; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 100; background: rgba(0,0,0,0.8); border: 1px solid #0f0; padding: 15px; }
+        #tracker { position: absolute; bottom: 20px; left: 20px; z-index: 100; display: grid; grid-template-columns: repeat(16, 30px); gap: 2px; }
+        .cell { width: 30px; height: 30px; border: 1px solid #0f0; text-align: center; cursor: pointer; color: #fff; line-height: 30px; }
+        .active { background: #0f0; color: #000; }
+        canvas { width: 100vw; height: 100vh; display: block; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h2>PHYSICS TRACKER v6.0</h2>
+        <input type="number" id="m" value="30" placeholder="Massa"> kg | 
+        <input type="number" id="h" value="1" placeholder="Korkeus"> m 
+        <button onclick="calcPhysics()">FYSIKKA</button><br>
+        <button onclick="togglePlay()">SPACE: PLAY/STOP</button> 
+        <button onclick="save()">TALLENNA</button> 
+        <p id="stats">Voima: 0 N | MODE: EDIT</p>
+    </div>
+    <div id="tracker"></div>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        let pattern = Array.from({length: 4}, () => Array(16).fill(0));
+        let step = 0, isPlaying = false, force = 0;
+
+        // 1. Fysiikka & TTS
+        function calcPhysics() {
+            const m = document.getElementById('m').value;
+            const h = document.getElementById('h').value;
+            force = (m * 9.81) + (m * Math.pow(Math.sqrt(2 * 9.81 * h), 2) / 0.1);
+            document.getElementById('stats').innerText = `Voima: ${force.toFixed(0)} N`;
+            const words = ["TERMINATE", "LOGIC", "SYSTEM", "COLD"];
+            window.speechSynthesis.speak(new SpeechSynthesisUtterance(words[Math.floor(Math.random()*words.length)]));
+        }
+
+        // 2. Audio Engine
+        function play(freq) {
+            const o = ctx.createOscillator(); const g = ctx.createGain();
+            o.type = 'square'; o.frequency.value = freq + (force/50);
+            g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+            o.connect(g); g.connect(ctx.destination);
+            o.start(); o.stop(ctx.currentTime + 0.1);
+        }
+
+        // 3. Tracker-ruudukko
+        const grid = document.getElementById('tracker');
+        for(let r=0; r<4; r++) {
+            for(let s=0; s<16; s++) {
+                let c = document.createElement('div'); c.className = 'cell';
+                c.onclick = () => { pattern[r][s] = (pattern[r][s] + 110) % 880; c.innerText = Math.floor(pattern[r][s]/100); };
+                grid.appendChild(c);
+            }
+        }
+
+        // 4. Play Loop
+        setInterval(() => {
+            if(!isPlaying) return;
+            for(let r=0; r<4; r++) if(pattern[r][step] > 0) play(pattern[r][step]);
+            document.querySelectorAll('.cell').forEach((c, i) => c.classList.toggle('active', i % 16 === step));
+            step = (step + 1) % 16;
+        }, 200);
+
+        // 5. Visualisointi
+        function draw() {
+            const c = document.getElementById('canvas').getContext('2d');
+            c.fillStyle = 'rgba(0,0,0,0.1)'; c.fillRect(0,0,window.innerWidth, window.innerHeight);
+            c.strokeStyle = '#0f0';
+            c.strokeRect(window.innerWidth/2 - force/10, window.innerHeight/2 - force/10, force/5, force/5);
+            requestAnimationFrame(draw);
+        }
+        draw();
+
+        // 6. Kontrollit
+        window.onkeydown = (e) => {
+            if(e.key === ' ') isPlaying = !isPlaying;
+            if(e.key === 's') pattern.forEach(r => r.sort(()=>Math.random()-0.5));
+        };
+        function save() { localStorage.setItem('data', JSON.stringify(pattern)); }
+    </script>
+</body>
+</html>
