@@ -2,87 +2,249 @@
 <html lang="fi">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PHYSICS TRACKER - MASTER EDITION</title>
     <style>
-        body { margin: 0; background: #000; color: #0f0; font-family: 'Courier New', monospace; overflow: hidden; }
-        #ui { position: absolute; top: 10px; left: 10px; z-index: 100; background: rgba(0,0,0,0.8); border: 1px solid #0f0; padding: 15px; }
-        #tracker { position: absolute; bottom: 20px; left: 20px; z-index: 100; display: grid; grid-template-columns: repeat(16, 30px); gap: 2px; }
-        .cell { width: 30px; height: 30px; border: 1px solid #0f0; text-align: center; cursor: pointer; color: #fff; line-height: 30px; }
-        .active { background: #0f0; color: #000; }
-        canvas { width: 100vw; height: 100vh; display: block; }
+        /* Retro CRT / C64 Estetiikka */
+        body { 
+            margin: 0; background: #000; color: #0f0; 
+            font-family: 'Courier New', Courier, monospace; 
+            overflow: hidden; user-select: none;
+        }
+        
+        /* Taustavisualisointi */
+        #canvas { 
+            position: absolute; top: 0; left: 0; 
+            width: 100vw; height: 100vh; z-index: 1; 
+        }
+
+        /* Käyttöliittymän asettelu */
+        #app {
+            position: relative; z-index: 10;
+            display: flex; flex-direction: column; 
+            align-items: center; justify-content: space-between;
+            height: 100vh; box-sizing: border-box; padding: 20px;
+            pointer-events: none; /* Antaa klikkausten mennä läpi taustaan jos tarpeen */
+        }
+
+        /* Paneelien tyylit (Hehkuvat laatikot) */
+        .panel {
+            background: rgba(0, 15, 0, 0.85); 
+            border: 2px solid #0f0; box-shadow: 0 0 15px rgba(0, 255, 0, 0.3);
+            padding: 20px; width: 100%; max-width: 800px;
+            pointer-events: auto; /* Aktivoi napit paneelien sisällä */
+        }
+
+        h2 { margin-top: 0; text-align: center; border-bottom: 1px solid #0f0; padding-bottom: 10px; letter-spacing: 2px; }
+        
+        /* Inputit ja napit */
+        .controls { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+        input { background: #000; color: #0f0; border: 1px solid #0f0; padding: 5px; width: 60px; font-family: inherit; text-align: right; }
+        button { background: #0f0; color: #000; border: 1px solid #0f0; padding: 10px 15px; font-family: inherit; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        button:hover { background: #000; color: #0f0; box-shadow: 0 0 10px #0f0; }
+        
+        #stats { text-align: center; margin-top: 15px; font-size: 1.2em; font-weight: bold; }
+
+        /* Trackerin ruudukko */
+        #tracker { 
+            display: grid; grid-template-columns: repeat(16, 1fr); 
+            gap: 4px; margin-top: 15px; 
+        }
+        .cell { 
+            aspect-ratio: 1; border: 1px solid rgba(0, 255, 0, 0.5); 
+            display: flex; align-items: center; justify-content: center; 
+            cursor: pointer; font-size: 0.9em; transition: background 0.1s; 
+        }
+        .cell:hover { background: rgba(0, 255, 0, 0.3); }
+        .active { background: #0f0; color: #000; font-weight: bold; transform: scale(1.1); box-shadow: 0 0 10px #0f0; }
     </style>
 </head>
 <body>
-    <div id="ui">
-        <h2>PHYSICS TRACKER v6.0</h2>
-        <input type="number" id="m" value="30" placeholder="Massa"> kg | 
-        <input type="number" id="h" value="1" placeholder="Korkeus"> m 
-        <button onclick="calcPhysics()">FYSIKKA</button><br>
-        <button onclick="togglePlay()">SPACE: PLAY/STOP</button> 
-        <button onclick="save()">TALLENNA</button> 
-        <p id="stats">Voima: 0 N | MODE: EDIT</p>
-    </div>
-    <div id="tracker"></div>
     <canvas id="canvas"></canvas>
 
+    <div id="app">
+        
+        <div class="panel">
+            <h2>PHYSICS TRACKER v7.0</h2>
+            <div class="controls">
+                <div>
+                    Massa: <input type="number" id="m" value="30"> kg
+                </div>
+                <div>
+                    Korkeus: <input type="number" id="h" value="1"> m
+                </div>
+                <button onclick="calcPhysics()">[ Laske Fysiikka ]</button>
+                <button onclick="togglePlay()" id="playBtn">[ SPACE: PLAY ]</button>
+                <button onclick="save()">[ Tallenna ]</button>
+            </div>
+            <div id="stats">VOIMA: 0 N | MODE: EDIT</div>
+        </div>
+
+        <div class="panel">
+            <div style="text-align: center; font-size: 0.8em; margin-bottom: 10px;">Klikkaa ruutuja syöttääksesi nuotteja. S = Shuffle.</div>
+            <div id="tracker"></div>
+        </div>
+
+    </div>
+
     <script>
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        // --- 1. ALUSTUS ---
+        const canvas = document.getElementById('canvas');
+        const ctxCanvas = canvas.getContext('2d');
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
         let pattern = Array.from({length: 4}, () => Array(16).fill(0));
-        let step = 0, isPlaying = false, force = 0;
+        let step = 0;
+        let isPlaying = false;
+        let force = 50; // Oletusvoima visualisointia varten
 
-        // 1. Fysiikka & TTS
+        // Asetetaan kankaan oikea koko
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // --- 2. FYSIIKKA JA TTS ---
         function calcPhysics() {
-            const m = document.getElementById('m').value;
-            const h = document.getElementById('h').value;
-            force = (m * 9.81) + (m * Math.pow(Math.sqrt(2 * 9.81 * h), 2) / 0.1);
-            document.getElementById('stats').innerText = `Voima: ${force.toFixed(0)} N`;
-            const words = ["TERMINATE", "LOGIC", "SYSTEM", "COLD"];
-            window.speechSynthesis.speak(new SpeechSynthesisUtterance(words[Math.floor(Math.random()*words.length)]));
+            if (audioCtx.state === 'suspended') audioCtx.resume(); // Selainvaatimus audiolle
+            
+            const m = parseFloat(document.getElementById('m').value) || 0;
+            const h = parseFloat(document.getElementById('h').value) || 0;
+            
+            // F = mg + mv^2 / d (Yksinkertaistettu vapaa pudotus)
+            let v = Math.sqrt(2 * 9.81 * Math.abs(h));
+            force = (m * 9.81) + (m * Math.pow(v, 2) / 0.1);
+            if (force < 50) force = 50; // Pidetään visuaalit elossa minimivoimalla
+            
+            document.getElementById('stats').innerText = `VOIMA: ${force.toFixed(0)} N | MODE: ${isPlaying ? 'PLAY' : 'EDIT'}`;
+            
+            // TTS Terminaattori-puhe
+            const words = ["SYSTEM", "LOGIC", "COLD", "TERMINATE"];
+            let msg = new SpeechSynthesisUtterance(words[Math.floor(Math.random() * words.length)]);
+            msg.pitch = 0.5; msg.rate = 0.8;
+            window.speechSynthesis.speak(msg);
         }
 
-        // 2. Audio Engine
-        function play(freq) {
-            const o = ctx.createOscillator(); const g = ctx.createGain();
-            o.type = 'square'; o.frequency.value = freq + (force/50);
-            g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
-            o.connect(g); g.connect(ctx.destination);
-            o.start(); o.stop(ctx.currentTime + 0.1);
+        // --- 3. ÄÄNIMOOTTORI ---
+        function playNote(freq) {
+            const osc = audioCtx.createOscillator(); 
+            const gain = audioCtx.createGain();
+            osc.type = 'square'; 
+            
+            // Mitä kovempi isku, sitä korkeammalle ääni voi moduloida
+            osc.frequency.setValueAtTime(freq + (force / 100), audioCtx.currentTime);
+            
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+            
+            osc.connect(gain); 
+            gain.connect(audioCtx.destination);
+            osc.start(); 
+            osc.stop(audioCtx.currentTime + 0.15);
         }
 
-        // 3. Tracker-ruudukko
+        // --- 4. KÄYTTÖLIITTYMÄN RAKENNUS ---
         const grid = document.getElementById('tracker');
         for(let r=0; r<4; r++) {
             for(let s=0; s<16; s++) {
-                let c = document.createElement('div'); c.className = 'cell';
-                c.onclick = () => { pattern[r][s] = (pattern[r][s] + 110) % 880; c.innerText = Math.floor(pattern[r][s]/100); };
-                grid.appendChild(c);
+                let cell = document.createElement('div'); 
+                cell.className = 'cell';
+                cell.innerText = '-';
+                cell.onclick = () => { 
+                    if (audioCtx.state === 'suspended') audioCtx.resume();
+                    pattern[r][s] = (pattern[r][s] === 0) ? 110 + (r*50) : (pattern[r][s] + 110);
+                    if (pattern[r][s] > 800) pattern[r][s] = 0; // Nollaus
+                    cell.innerText = pattern[r][s] === 0 ? '-' : Math.floor(pattern[r][s]/10); 
+                    if(pattern[r][s] > 0) playNote(pattern[r][s]);
+                };
+                grid.appendChild(cell);
             }
         }
 
-        // 4. Play Loop
+        // --- 5. SEKVENSSEERILUUPPI ---
+        function togglePlay() {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            isPlaying = !isPlaying;
+            document.getElementById('playBtn').innerText = isPlaying ? '[ SPACE: STOP ]' : '[ SPACE: PLAY ]';
+            document.getElementById('stats').innerText = `VOIMA: ${force.toFixed(0)} N | MODE: ${isPlaying ? 'PLAY' : 'EDIT'}`;
+        }
+
         setInterval(() => {
             if(!isPlaying) return;
-            for(let r=0; r<4; r++) if(pattern[r][step] > 0) play(pattern[r][step]);
-            document.querySelectorAll('.cell').forEach((c, i) => c.classList.toggle('active', i % 16 === step));
+            
+            // Soita rivin nuotit
+            for(let r=0; r<4; r++) {
+                if(pattern[r][step] > 0) playNote(pattern[r][step]);
+            }
+            
+            // Päivitä visuaalinen aktiivinen steppi
+            let cells = document.querySelectorAll('.cell');
+            cells.forEach((c, index) => {
+                if (index % 16 === step) c.classList.add('active');
+                else c.classList.remove('active');
+            });
+            
             step = (step + 1) % 16;
-        }, 200);
+        }, 150); // Tempo: 150ms
 
-        // 5. Visualisointi
+        // --- 6. TAUSTAVISUALISOINTI (TUNNELI) ---
         function draw() {
-            const c = document.getElementById('canvas').getContext('2d');
-            c.fillStyle = 'rgba(0,0,0,0.1)'; c.fillRect(0,0,window.innerWidth, window.innerHeight);
-            c.strokeStyle = '#0f0';
-            c.strokeRect(window.innerWidth/2 - force/10, window.innerHeight/2 - force/10, force/5, force/5);
+            // Luo jättöjäljen (trail effect)
+            ctxCanvas.fillStyle = 'rgba(0, 0, 0, 0.2)'; 
+            ctxCanvas.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctxCanvas.strokeStyle = '#0f0';
+            ctxCanvas.lineWidth = 2;
+            
+            let time = Date.now() * 0.002;
+            
+            ctxCanvas.save();
+            ctxCanvas.translate(canvas.width / 2, canvas.height / 2);
+            
+            // Piirretään sykkivä neliötunneli
+            for(let i = 0; i < 12; i++) {
+                // Koon kiihtyvyys perustuu fysiikkaan (force)
+                let size = (i * 30) + (Math.sin(time + i) * (force / 5));
+                
+                // Pieni pyörimisliike
+                ctxCanvas.rotate(Math.sin(time * 0.1) * 0.02); 
+                
+                ctxCanvas.beginPath();
+                ctxCanvas.rect(-size / 2, -size / 2, size, size);
+                ctxCanvas.stroke();
+            }
+            ctxCanvas.restore();
+            
             requestAnimationFrame(draw);
         }
-        draw();
+        draw(); // Käynnistetään piirtolooppi
 
-        // 6. Kontrollit
-        window.onkeydown = (e) => {
-            if(e.key === ' ') isPlaying = !isPlaying;
-            if(e.key === 's') pattern.forEach(r => r.sort(()=>Math.random()-0.5));
-        };
-        function save() { localStorage.setItem('data', JSON.stringify(pattern)); }
+        // --- 7. NÄPPÄIMISTÖKONTROLLIT ---
+        window.addEventListener('keydown', (e) => {
+            if(e.code === 'Space') {
+                e.preventDefault(); // Estetään sivun vieritys
+                togglePlay();
+            }
+            if(e.key === 's') {
+                pattern.forEach(r => r.sort(()=>Math.random()-0.5)); // Shuffle
+                // Päivitä numerot UI:hin
+                let cells = document.querySelectorAll('.cell');
+                for(let r=0; r<4; r++) {
+                    for(let s=0; s<16; s++) {
+                        let val = pattern[r][s];
+                        cells[r*16 + s].innerText = val === 0 ? '-' : Math.floor(val/10);
+                    }
+                }
+            }
+        });
+
+        // --- 8. TALLENNUS ---
+        function save() { 
+            localStorage.setItem('physicsTrackerData', JSON.stringify(pattern)); 
+            alert("Sekvenssi tallennettu selaimen muistiin!");
+        }
     </script>
 </body>
 </html>
