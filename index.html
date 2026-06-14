@@ -147,18 +147,32 @@
 
         // --- 4. KÄYTTÖLIITTYMÄN RAKENNUS ---
         const grid = document.getElementById('tracker');
+        const cellData = []; // Store cell references for better tracking
+        
         for(let r=0; r<4; r++) {
+            cellData[r] = [];
             for(let s=0; s<16; s++) {
                 let cell = document.createElement('div'); 
                 cell.className = 'cell';
                 cell.innerText = '-';
+                cell.dataset.row = r;
+                cell.dataset.col = s;
+                
                 cell.onclick = () => { 
                     if (audioCtx.state === 'suspended') audioCtx.resume();
-                    pattern[r][s] = (pattern[r][s] === 0) ? 110 + (r*50) : (pattern[r][s] + 110);
-                    if (pattern[r][s] > 800) pattern[r][s] = 0; // Nollaus
+                    
+                    // FIX: Better frequency cycling logic
+                    const freqSteps = [0, 110 + (r*50), 220 + (r*50), 330 + (r*50), 440 + (r*50)];
+                    const currentIndex = freqSteps.indexOf(pattern[r][s]);
+                    const nextIndex = (currentIndex + 1) % freqSteps.length;
+                    pattern[r][s] = freqSteps[nextIndex];
+                    
+                    // Update display
                     cell.innerText = pattern[r][s] === 0 ? '-' : Math.floor(pattern[r][s]/10); 
                     if(pattern[r][s] > 0) playNote(pattern[r][s]);
                 };
+                
+                cellData[r][s] = cell;
                 grid.appendChild(cell);
             }
         }
@@ -179,12 +193,16 @@
                 if(pattern[r][step] > 0) playNote(pattern[r][step]);
             }
             
-            // Päivitä visuaalinen aktiivinen steppi
-            let cells = document.querySelectorAll('.cell');
-            cells.forEach((c, index) => {
-                if (index % 16 === step) c.classList.add('active');
-                else c.classList.remove('active');
-            });
+            // FIX: Use stored cell references instead of querySelectorAll
+            for(let r=0; r<4; r++) {
+                for(let s=0; s<16; s++) {
+                    if (s === step) {
+                        cellData[r][s].classList.add('active');
+                    } else {
+                        cellData[r][s].classList.remove('active');
+                    }
+                }
+            }
             
             step = (step + 1) % 16;
         }, 150); // Tempo: 150ms
@@ -203,13 +221,14 @@
             ctxCanvas.save();
             ctxCanvas.translate(canvas.width / 2, canvas.height / 2);
             
+            // FIX: Move rotation outside the loop to prevent cumulative rotation
+            let rotation = Math.sin(time * 0.1) * 0.05;
+            ctxCanvas.rotate(rotation);
+            
             // Piirretään sykkivä neliötunneli
             for(let i = 0; i < 12; i++) {
                 // Koon kiihtyvyys perustuu fysiikkaan (force)
                 let size = (i * 30) + (Math.sin(time + i) * (force / 5));
-                
-                // Pieni pyörimisliike
-                ctxCanvas.rotate(Math.sin(time * 0.1) * 0.02); 
                 
                 ctxCanvas.beginPath();
                 ctxCanvas.rect(-size / 2, -size / 2, size, size);
@@ -227,14 +246,16 @@
                 e.preventDefault(); // Estetään sivun vieritys
                 togglePlay();
             }
-            if(e.key === 's') {
-                pattern.forEach(r => r.sort(()=>Math.random()-0.5)); // Shuffle
-                // Päivitä numerot UI:hin
-                let cells = document.querySelectorAll('.cell');
+            if(e.key === 's' || e.key === 'S') {
+                // FIX: Better shuffle that maintains valid frequency values
                 for(let r=0; r<4; r++) {
                     for(let s=0; s<16; s++) {
-                        let val = pattern[r][s];
-                        cells[r*16 + s].innerText = val === 0 ? '-' : Math.floor(val/10);
+                        // Randomly assign frequencies from valid set
+                        const freqOptions = [0, 110 + (r*50), 220 + (r*50), 330 + (r*50), 440 + (r*50)];
+                        pattern[r][s] = freqOptions[Math.floor(Math.random() * freqOptions.length)];
+                        
+                        // Update UI
+                        cellData[r][s].innerText = pattern[r][s] === 0 ? '-' : Math.floor(pattern[r][s]/10);
                     }
                 }
             }
