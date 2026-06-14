@@ -75,13 +75,14 @@
                 </div>
                 <button onclick="calcPhysics()">[ Laske Fysiikka ]</button>
                 <button onclick="togglePlay()" id="playBtn">[ SPACE: PLAY ]</button>
+                <button onclick="generateMusic()">[ GENEROI MUSIIKKI ]</button>
                 <button onclick="save()">[ Tallenna ]</button>
             </div>
             <div id="stats">VOIMA: 0 N | MODE: EDIT</div>
         </div>
 
         <div class="panel">
-            <div style="text-align: center; font-size: 0.8em; margin-bottom: 10px;">Klikkaa ruutuja syöttääksesi nuotteja. S = Shuffle.</div>
+            <div style="text-align: center; font-size: 0.8em; margin-bottom: 10px;">Klikkaa ruutuja syöttääksesi nuotteja. S = Shuffle. G = Auto-generoi.</div>
             <div id="tracker"></div>
         </div>
 
@@ -92,6 +93,15 @@
         const canvas = document.getElementById('canvas');
         const ctxCanvas = canvas.getContext('2d');
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        // Resume audio context on user interaction
+        function resumeAudioContext() {
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume().catch(e => console.log('Audio resume blocked:', e));
+            }
+        }
+        document.addEventListener('click', resumeAudioContext);
+        document.addEventListener('keydown', resumeAudioContext);
         
         let pattern = Array.from({length: 4}, () => Array(16).fill(0));
         let step = 0;
@@ -106,12 +116,12 @@
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();
 
-        // --- 2. FYSIIKKA JA TTS ---
+        // --- 2. FYSIIKKA ---
         function calcPhysics() {
-            if (audioCtx.state === 'suspended') audioCtx.resume(); // Selainvaatimus audiolle
+            resumeAudioContext();
             
-            const m = parseFloat(document.getElementById('m').value) || 0;
-            const h = parseFloat(document.getElementById('h').value) || 0;
+            const m = parseFloat(document.getElementById('m').value) || 1;
+            const h = parseFloat(document.getElementById('h').value) || 1;
             
             // F = mg + mv^2 / d (Yksinkertaistettu vapaa pudotus)
             let v = Math.sqrt(2 * 9.81 * Math.abs(h));
@@ -119,30 +129,30 @@
             if (force < 50) force = 50; // Pidetään visuaalit elossa minimivoimalla
             
             document.getElementById('stats').innerText = `VOIMA: ${force.toFixed(0)} N | MODE: ${isPlaying ? 'PLAY' : 'EDIT'}`;
-            
-            // TTS Terminaattori-puhe
-            const words = ["SYSTEM", "LOGIC", "COLD", "TERMINATE"];
-            let msg = new SpeechSynthesisUtterance(words[Math.floor(Math.random() * words.length)]);
-            msg.pitch = 0.5; msg.rate = 0.8;
-            window.speechSynthesis.speak(msg);
         }
 
         // --- 3. ÄÄNIMOOTTORI ---
-        function playNote(freq) {
-            const osc = audioCtx.createOscillator(); 
-            const gain = audioCtx.createGain();
-            osc.type = 'square'; 
+        function playNote(freq, duration = 0.15, volume = 0.1) {
+            if (audioCtx.state === 'suspended') return;
             
-            // Mitä kovempi isku, sitä korkeammalle ääni voi moduloida
-            osc.frequency.setValueAtTime(freq + (force / 100), audioCtx.currentTime);
-            
-            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
-            
-            osc.connect(gain); 
-            gain.connect(audioCtx.destination);
-            osc.start(); 
-            osc.stop(audioCtx.currentTime + 0.15);
+            try {
+                const osc = audioCtx.createOscillator(); 
+                const gain = audioCtx.createGain();
+                osc.type = 'square'; 
+                
+                // Mitä kovempi isku, sitä korkeammalle ääni voi moduloida
+                osc.frequency.setValueAtTime(freq + (force / 100), audioCtx.currentTime);
+                
+                gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+                
+                osc.connect(gain); 
+                gain.connect(audioCtx.destination);
+                osc.start(); 
+                osc.stop(audioCtx.currentTime + duration);
+            } catch(e) {
+                console.log('Playback error:', e);
+            }
         }
 
         // --- 4. KÄYTTÖLIITTYMÄN RAKENNUS ---
@@ -159,7 +169,7 @@
                 cell.dataset.col = s;
                 
                 cell.onclick = () => { 
-                    if (audioCtx.state === 'suspended') audioCtx.resume();
+                    resumeAudioContext();
                     
                     // FIX: Better frequency cycling logic
                     const freqSteps = [0, 110 + (r*50), 220 + (r*50), 330 + (r*50), 440 + (r*50)];
@@ -177,23 +187,57 @@
             }
         }
 
-        // --- 5. SEKVENSSEERILUUPPI ---
+        // --- 5. AUTOMATIC MUSIC GENERATION ---
+        function generateMusic() {
+            resumeAudioContext();
+            
+            // Generate a random but musical pattern
+            for(let r=0; r<4; r++) {
+                for(let s=0; s<16; s++) {
+                    // Create scale: pentatonic or chromatic based on row
+                    const scales = [
+                        [0, 110, 165, 220, 275], // A minor scale-ish
+                        [0, 132, 198, 264, 330], // C ish
+                        [0, 146, 220, 293, 440], // D ish
+                        [0, 110, 220, 330, 440]  // A harmonics
+                    ];
+                    
+                    // 70% chance of note, 30% silence
+                    if (Math.random() < 0.7) {
+                        const scale = scales[r];
+                        pattern[r][s] = scale[Math.floor(Math.random() * scale.length)];
+                    } else {
+                        pattern[r][s] = 0;
+                    }
+                    
+                    cellData[r][s].innerText = pattern[r][s] === 0 ? '-' : Math.floor(pattern[r][s]/10);
+                }
+            }
+            
+            // Start playing if not already playing
+            if (!isPlaying) togglePlay();
+        }
+
+        // --- 6. SEKVENSSEERILUUPPI ---
         function togglePlay() {
-            if (audioCtx.state === 'suspended') audioCtx.resume();
+            resumeAudioContext();
             isPlaying = !isPlaying;
             document.getElementById('playBtn').innerText = isPlaying ? '[ SPACE: STOP ]' : '[ SPACE: PLAY ]';
             document.getElementById('stats').innerText = `VOIMA: ${force.toFixed(0)} N | MODE: ${isPlaying ? 'PLAY' : 'EDIT'}`;
         }
 
+        // Sequencer loop - runs continuously
         setInterval(() => {
             if(!isPlaying) return;
             
             // Soita rivin nuotit
             for(let r=0; r<4; r++) {
-                if(pattern[r][step] > 0) playNote(pattern[r][step]);
+                if(pattern[r][step] > 0) {
+                    playNote(pattern[r][step]);
+                }
             }
             
-            // FIX: Use stored cell references instead of querySelectorAll
+            // Update visuals
             for(let r=0; r<4; r++) {
                 for(let s=0; s<16; s++) {
                     if (s === step) {
@@ -207,7 +251,7 @@
             step = (step + 1) % 16;
         }, 150); // Tempo: 150ms
 
-        // --- 6. TAUSTAVISUALISOINTI (TUNNELI) ---
+        // --- 7. TAUSTAVISUALISOINTI (TUNNELI) ---
         function draw() {
             // Luo jättöjäljen (trail effect)
             ctxCanvas.fillStyle = 'rgba(0, 0, 0, 0.2)'; 
@@ -240,14 +284,14 @@
         }
         draw(); // Käynnistetään piirtolooppi
 
-        // --- 7. NÄPPÄIMISTÖKONTROLLIT ---
+        // --- 8. NÄPPÄIMISTÖKONTROLLIT ---
         window.addEventListener('keydown', (e) => {
             if(e.code === 'Space') {
                 e.preventDefault(); // Estetään sivun vieritys
                 togglePlay();
             }
             if(e.key === 's' || e.key === 'S') {
-                // FIX: Better shuffle that maintains valid frequency values
+                // Better shuffle that maintains valid frequency values
                 for(let r=0; r<4; r++) {
                     for(let s=0; s<16; s++) {
                         // Randomly assign frequencies from valid set
@@ -259,13 +303,33 @@
                     }
                 }
             }
+            if(e.key === 'g' || e.key === 'G') {
+                generateMusic();
+            }
         });
 
-        // --- 8. TALLENNUS ---
+        // --- 9. TALLENNUS ---
         function save() { 
             localStorage.setItem('physicsTrackerData', JSON.stringify(pattern)); 
             alert("Sekvenssi tallennettu selaimen muistiin!");
         }
+
+        // Load saved pattern on start
+        window.addEventListener('load', () => {
+            const saved = localStorage.getItem('physicsTrackerData');
+            if (saved) {
+                try {
+                    pattern = JSON.parse(saved);
+                    for(let r=0; r<4; r++) {
+                        for(let s=0; s<16; s++) {
+                            cellData[r][s].innerText = pattern[r][s] === 0 ? '-' : Math.floor(pattern[r][s]/10);
+                        }
+                    }
+                } catch(e) {
+                    console.log('Could not load saved pattern');
+                }
+            }
+        });
     </script>
 </body>
 </html>
